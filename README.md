@@ -20,6 +20,7 @@ User <= Image <= r2-image-worker <= CDN Cache <= R2
 
 - Cloudflare Account
 - Wrangler CLI
+- Nix with flakes enabled
 - _Optional: Custom domain - (Cache API is not available in `.workers.dev` domain)_
 
 ## Set up
@@ -29,6 +30,19 @@ First, `git clone`
 ```plain
 git clone https://github.com/yusukebe/r2-image-worker.git
 cd r2-image-worker
+```
+
+Enter the development shell:
+
+```bash
+nix develop
+moon version
+```
+
+If you use direnv:
+
+```bash
+direnv allow
 ```
 
 Create R2 bucket:
@@ -66,6 +80,16 @@ To publish to your Cloudflare Workers:
 
 ```bash
 npm run deploy
+```
+
+## MoonBit
+
+The Nix shell provides MoonBit from
+[`moonbit-community/moonbit-overlay`](https://github.com/moonbit-community/moonbit-overlay).
+After MoonBit sources are added, build the JavaScript target with:
+
+```bash
+moon build --target js --release
 ```
 
 ## Endpoints
