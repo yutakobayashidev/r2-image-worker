@@ -22,10 +22,6 @@ extern "js" fn form_string(fd : @http.FormData, name : String) -> String? =
   #| }
 
 ///|
-extern "js" fn file_text(file : @file.File) -> @js_async.Promise[String] =
-  #| (file) => file.text()
-
-///|
 extern "js" fn file_array_buffer(
   file : @file.File,
 ) -> @js_async.Promise[@core.Any] =
@@ -51,10 +47,9 @@ extern "js" fn btoa(value : String) -> String =
   #| (value) => btoa(value)
 
 ///|
-extern "js" fn sha256_hex(value : String) -> @js_async.Promise[String] =
+extern "js" fn sha256_hex(value : @core.Any) -> @js_async.Promise[String] =
   #| async (value) => {
-  #|   const data = new TextEncoder().encode(value);
-  #|   const digest = await crypto.subtle.digest("SHA-256", data);
+  #|   const digest = await crypto.subtle.digest("SHA-256", value);
   #|   return [...new Uint8Array(digest)]
   #|     .map((byte) => byte.toString(16).padStart(2, "0"))
   #|     .join("");
@@ -174,8 +169,8 @@ fn image_parameters(params : @url.URLSearchParams) -> @core.Any? {
 }
 
 ///|
-async fn sha256_text(text : String) -> String {
-  sha256_hex(text).wait()
+async fn sha256_array_buffer(buffer : @core.Any) -> String {
+  sha256_hex(buffer).wait()
 }
 
 ///|
@@ -194,9 +189,8 @@ async fn handle_upload(
   }
   let content_type = image.contentType()
   let extension = extension_for(content_type)
-  let body_text = file_text(image).wait()
   let body = file_array_buffer(image).wait()
-  let hash = sha256_text(body_text)
+  let hash = sha256_array_buffer(body)
   let key = match (form_string(form, "width"), form_string(form, "height")) {
     (Some(width), Some(height)) =>
       hash + "_" + width + "x" + height + "." + extension

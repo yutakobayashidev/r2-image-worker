@@ -60,6 +60,25 @@ describe('r2-image-worker', () => {
     expect(await responseBody(stored)).toBe('hello')
   })
 
+  it('hashes the uploaded image bytes instead of decoded text', async () => {
+    const form = new FormData()
+    const bytes = new Uint8Array([0xff, 0xfe, 0xfd, 0x00, 0x61])
+    form.set('image', new File([bytes], 'binary.png', { type: 'image/png' }))
+
+    const response = await upload(form)
+
+    expect(response.status).toBe(200)
+    const key = await response.text()
+    expect(key).toBe('e42525c873fd49fed8ad1649f1630831fa5cb9188fa0b20ed8321a2e1ed8f5fc.png')
+
+    const stored = await worker.fetch(
+      new Request(`https://example.test/${key}`),
+      { ...env, USER: 'user', PASS: 'pass' },
+      ctx
+    )
+    expect(new Uint8Array(await stored.arrayBuffer())).toEqual(bytes)
+  })
+
   it('serves a stored image with cache and content-type headers', async () => {
     const bucket = env.BUCKET as R2Bucket
     await bucket.put('stored.webp', 'image-data', {
