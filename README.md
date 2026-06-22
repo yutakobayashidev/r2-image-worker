@@ -20,7 +20,9 @@ User <= Image <= r2-image-worker <= CDN Cache <= R2
 
 - Cloudflare Account
 - Wrangler CLI
-- _Optional: Custom domain - (Cache API is not available in `.workers.dev` domain)_
+- Nix with flakes enabled
+- _Custom domain if you want Cloudflare Cache API support. The Worker still
+  serves files on `.workers.dev`, but Cache API is not available there._
 
 ## Set up
 
@@ -29,6 +31,19 @@ First, `git clone`
 ```plain
 git clone https://github.com/yusukebe/r2-image-worker.git
 cd r2-image-worker
+```
+
+Enter the development shell:
+
+```bash
+nix develop
+moon version
+```
+
+If you use direnv:
+
+```bash
+direnv allow
 ```
 
 Create R2 bucket:
@@ -67,6 +82,33 @@ To publish to your Cloudflare Workers:
 ```bash
 npm run deploy
 ```
+
+## MoonBit
+
+The Nix shell provides MoonBit from
+[`moonbit-community/moonbit-overlay`](https://github.com/moonbit-community/moonbit-overlay).
+The Worker implementation lives in `src/worker.mbt`; `src/index.ts` is a thin
+Cloudflare Workers entrypoint that imports the generated JavaScript.
+
+Build the JavaScript target with:
+
+```bash
+npm run build
+```
+
+Run the Cloudflare Workers e2e tests with:
+
+```bash
+npm test
+```
+
+The tests use `@cloudflare/vitest-pool-workers` and `cloudflare:test` with an
+actual Miniflare R2 binding. R2 isolated storage is disabled in the test config
+because R2 object body streams hit the current Workers pool isolated-storage
+limitation.
+
+GET responses use `caches.open("r2-image-worker").match/put` and keep
+`Cache-Control: public, max-age=2592000`.
 
 ## Endpoints
 

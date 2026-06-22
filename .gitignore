@@ -2,6 +2,8 @@
 dist
 node_modules
 worker
+_build
+.mooncakes
 package-lock.json
 yarn.lock
 .cargo-ok
