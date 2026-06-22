@@ -7,6 +7,19 @@ const ctx: ExecutionContext = {
   passThroughOnException: () => {}
 }
 
+const collectCtx = () => {
+  const promises: Promise<unknown>[] = []
+  return {
+    ctx: {
+      waitUntil: (promise: Promise<unknown>) => {
+        promises.push(promise)
+      },
+      passThroughOnException: () => {}
+    } satisfies ExecutionContext,
+    wait: () => Promise.all(promises)
+  }
+}
+
 const upload = (form: FormData, auth = 'Basic ' + btoa('user:pass')) =>
   worker.fetch(
     new Request('https://example.test/upload', {
@@ -26,6 +39,13 @@ describe('r2-image-worker', () => {
     const bucket = env.BUCKET as R2Bucket
     const objects = await bucket.list()
     await Promise.all(objects.objects.map((object) => bucket.delete(object.key)))
+    const namedCache = await caches.open('r2-image-worker')
+    await Promise.all([
+      caches.default.delete('https://example.test/cached.webp'),
+      caches.default.delete('https://example.test/auth-cache.webp'),
+      namedCache.delete('https://example.test/cached.webp'),
+      namedCache.delete('https://example.test/auth-cache.webp')
+    ])
   })
 
   it('rejects upload without valid basic auth', async () => {
@@ -97,24 +117,51 @@ describe('r2-image-worker', () => {
     expect(await responseBody(response)).toBe('image-data')
   })
 
-  it('serves repeated GET requests from the default cache', async () => {
+  it('serves repeated GET requests from the named cache', async () => {
     const bucket = env.BUCKET as R2Bucket
     await bucket.put('cached.webp', 'cached-image', {
       httpMetadata: { contentType: 'image/webp' }
     })
 
     const request = new Request('https://example.test/cached.webp')
-    await caches.default.delete(request)
+    const { ctx: cacheCtx, wait } = collectCtx()
 
-    const first = await worker.fetch(request, { ...env, USER: 'user', PASS: 'pass' }, ctx)
+    const first = await worker.fetch(request, { ...env, USER: 'user', PASS: 'pass' }, cacheCtx)
     expect(first.status).toBe(200)
     expect(await responseBody(first)).toBe('cached-image')
+    await wait()
 
     await bucket.delete('cached.webp')
 
-    const second = await worker.fetch(request, { ...env, USER: 'user', PASS: 'pass' }, ctx)
+    const second = await worker.fetch(request, { ...env, USER: 'user', PASS: 'pass' }, cacheCtx)
     expect(second.status).toBe(200)
     expect(await responseBody(second)).toBe('cached-image')
+  })
+
+  it('does not cache GET requests with authorization headers', async () => {
+    const bucket = env.BUCKET as R2Bucket
+    await bucket.put('auth-cache.webp', 'private-ish', {
+      httpMetadata: { contentType: 'image/webp' }
+    })
+
+    const request = new Request('https://example.test/auth-cache.webp', {
+      headers: { Authorization: 'Basic something' }
+    })
+    const { ctx: cacheCtx, wait } = collectCtx()
+
+    const first = await worker.fetch(request, { ...env, USER: 'user', PASS: 'pass' }, cacheCtx)
+    expect(first.status).toBe(200)
+    expect(await responseBody(first)).toBe('private-ish')
+    await wait()
+
+    await bucket.delete('auth-cache.webp')
+
+    const second = await worker.fetch(
+      new Request('https://example.test/auth-cache.webp'),
+      { ...env, USER: 'user', PASS: 'pass' },
+      cacheCtx
+    )
+    expect(second.status).toBe(404)
   })
 
   it('returns 404 for a missing image key', async () => {

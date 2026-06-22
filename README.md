@@ -107,7 +107,7 @@ actual Miniflare R2 binding. R2 isolated storage is disabled in the test config
 because R2 object body streams hit the current Workers pool isolated-storage
 limitation.
 
-GET responses use `caches.default.match/put` and keep
+GET responses use `caches.open("r2-image-worker").match/put` and keep
 `Cache-Control: public, max-age=2592000`.
 
 ## Endpoints

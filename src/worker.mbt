@@ -117,12 +117,18 @@ extern "js" fn response_set_header(
   #| (response, name, value) => response.headers.set(name, value)
 
 ///|
+extern "js" fn response_clone(response : @http.Response) -> @http.Response =
+  #| (response) => response.clone()
+
+///|
 extern "js" fn cache_match(
   request : @cloudflare.CloudflareRequest,
 ) -> @js_async.Promise[@http.Response?] =
   #| async (request) => {
   #|   try {
-  #|     return await caches.default.match(request) ?? undefined;
+  #|     const cache = await caches.open("r2-image-worker");
+  #|     const response = await cache.match(request);
+  #|     return response ? new Response(response.body, response) : undefined;
   #|   } catch {
   #|     return undefined;
   #|   }
@@ -132,12 +138,22 @@ extern "js" fn cache_match(
 extern "js" fn cache_put(
   request : @cloudflare.CloudflareRequest,
   response : @http.Response,
-) -> @js_async.Promise[Unit] =
+) -> @core.Promise[Unit] =
   #| async (request, response) => {
   #|   try {
-  #|     await caches.default.put(request, response.clone());
+  #|     const cache = await caches.open("r2-image-worker");
+  #|     await cache.put(request, response);
   #|   } catch {
   #|   }
+  #| }
+
+///|
+extern "js" fn should_cache_response(response : @http.Response) -> Bool =
+  #| (response) => {
+  #|   if (response.status !== 200) return false;
+  #|   if (response.headers.has("Set-Cookie")) return false;
+  #|   const cacheControl = response.headers.get("Cache-Control");
+  #|   return !cacheControl || !/(?:^|,\s*)(?:private|no-(?:store|cache))(?:\s*(?:=|,|$))/i.test(cacheControl);
   #| }
 
 ///|
@@ -272,9 +288,13 @@ async fn handle_upload(
 async fn handle_get(
   req : @cloudflare.CloudflareRequest,
   env : @cloudflare.CloudflareEnv,
+  ctx : @cloudflare.CloudflareContext,
 ) -> @http.Response {
-  if cache_match(req).wait() is Some(response) {
-    return response
+  let use_cache = req.header("Authorization") is None
+  if use_cache {
+    if cache_match(req).wait() is Some(response) {
+      return response
+    }
   }
 
   let url = @url.URL::new(req.url)
@@ -306,7 +326,9 @@ async fn handle_get(
           format,
         ).wait()
         response_set_header(response, "Cache-Control", cache_control)
-        cache_put(req, response).wait()
+        if use_cache && should_cache_response(response) {
+          ctx.waitUntil(cache_put(req, response_clone(response)))
+        }
         return response
       }
       _ => ()
@@ -317,7 +339,9 @@ async fn handle_get(
   headers_set(headers, "Cache-Control", cache_control)
   headers_set(headers, "Content-Type", content_type)
   let response = response_stream(object.body(), 200, headers)
-  cache_put(req, response).wait()
+  if use_cache && should_cache_response(response) {
+    ctx.waitUntil(cache_put(req, response_clone(response)))
+  }
   response
 }
 
@@ -326,12 +350,12 @@ pub fn get_fetch_handler() -> @cloudflare.CloudflareFetchHandler {
   let async_handler = async fn(
     req : @cloudflare.CloudflareRequest,
     env : @cloudflare.CloudflareEnv,
-    _ctx : @cloudflare.CloudflareContext,
+    ctx : @cloudflare.CloudflareContext,
   ) -> @http.Response {
     if req.method_() == "PUT" && @url.URL::new(req.url).pathname == "/upload" {
       handle_upload(req, env)
     } else if req.method_() == "GET" {
-      handle_get(req, env)
+      handle_get(req, env, ctx)
     } else {
       @http.Response::text_("404 Not Found", 404)
     }
