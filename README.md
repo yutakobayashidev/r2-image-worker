@@ -86,11 +86,25 @@ npm run deploy
 
 The Nix shell provides MoonBit from
 [`moonbit-community/moonbit-overlay`](https://github.com/moonbit-community/moonbit-overlay).
-After MoonBit sources are added, build the JavaScript target with:
+The Worker implementation lives in `src/worker.mbt`; `src/index.ts` is a thin
+Cloudflare Workers entrypoint that imports the generated JavaScript.
+
+Build the JavaScript target with:
 
 ```bash
-moon build --target js --release
+npm run build
 ```
+
+Run the Cloudflare Workers e2e tests with:
+
+```bash
+npm test
+```
+
+The tests use `@cloudflare/vitest-pool-workers` and `cloudflare:test` with an
+actual Miniflare R2 binding. R2 isolated storage is disabled in the test config
+because R2 object body streams hit the current Workers pool isolated-storage
+limitation.
 
 ## Endpoints
 
