@@ -21,7 +21,8 @@ User <= Image <= r2-image-worker <= CDN Cache <= R2
 - Cloudflare Account
 - Wrangler CLI
 - Nix with flakes enabled
-- _Optional: Custom domain - (Cache API is not available in `.workers.dev` domain)_
+- _Custom domain if you want Cloudflare Cache API support. The Worker still
+  serves files on `.workers.dev`, but Cache API is not available there._
 
 ## Set up
 
@@ -105,6 +106,9 @@ The tests use `@cloudflare/vitest-pool-workers` and `cloudflare:test` with an
 actual Miniflare R2 binding. R2 isolated storage is disabled in the test config
 because R2 object body streams hit the current Workers pool isolated-storage
 limitation.
+
+GET responses use `caches.default.match/put` and keep
+`Cache-Control: public, max-age=2592000`.
 
 ## Endpoints
 

@@ -117,6 +117,30 @@ extern "js" fn response_set_header(
   #| (response, name, value) => response.headers.set(name, value)
 
 ///|
+extern "js" fn cache_match(
+  request : @cloudflare.CloudflareRequest,
+) -> @js_async.Promise[@http.Response?] =
+  #| async (request) => {
+  #|   try {
+  #|     return await caches.default.match(request) ?? undefined;
+  #|   } catch {
+  #|     return undefined;
+  #|   }
+  #| }
+
+///|
+extern "js" fn cache_put(
+  request : @cloudflare.CloudflareRequest,
+  response : @http.Response,
+) -> @js_async.Promise[Unit] =
+  #| async (request, response) => {
+  #|   try {
+  #|     await caches.default.put(request, response.clone());
+  #|   } catch {
+  #|   }
+  #| }
+
+///|
 fn env_r2(env : @cloudflare.CloudflareEnv) -> @cloudflare.R2Bucket {
   env.get("BUCKET").unwrap().cast()
 }
@@ -249,6 +273,10 @@ async fn handle_get(
   req : @cloudflare.CloudflareRequest,
   env : @cloudflare.CloudflareEnv,
 ) -> @http.Response {
+  if cache_match(req).wait() is Some(response) {
+    return response
+  }
+
   let url = @url.URL::new(req.url)
   let key = url.pathname[1:].to_owned()
   let object = env_r2(env).get(key)
@@ -278,6 +306,7 @@ async fn handle_get(
           format,
         ).wait()
         response_set_header(response, "Cache-Control", cache_control)
+        cache_put(req, response).wait()
         return response
       }
       _ => ()
@@ -287,7 +316,9 @@ async fn handle_get(
   let headers = headers_new()
   headers_set(headers, "Cache-Control", cache_control)
   headers_set(headers, "Content-Type", content_type)
-  response_stream(object.body(), 200, headers)
+  let response = response_stream(object.body(), 200, headers)
+  cache_put(req, response).wait()
+  response
 }
 
 ///|

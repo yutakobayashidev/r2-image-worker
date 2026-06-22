@@ -97,6 +97,26 @@ describe('r2-image-worker', () => {
     expect(await responseBody(response)).toBe('image-data')
   })
 
+  it('serves repeated GET requests from the default cache', async () => {
+    const bucket = env.BUCKET as R2Bucket
+    await bucket.put('cached.webp', 'cached-image', {
+      httpMetadata: { contentType: 'image/webp' }
+    })
+
+    const request = new Request('https://example.test/cached.webp')
+    await caches.default.delete(request)
+
+    const first = await worker.fetch(request, { ...env, USER: 'user', PASS: 'pass' }, ctx)
+    expect(first.status).toBe(200)
+    expect(await responseBody(first)).toBe('cached-image')
+
+    await bucket.delete('cached.webp')
+
+    const second = await worker.fetch(request, { ...env, USER: 'user', PASS: 'pass' }, ctx)
+    expect(second.status).toBe(200)
+    expect(await responseBody(second)).toBe('cached-image')
+  })
+
   it('returns 404 for a missing image key', async () => {
     const response = await worker.fetch(
       new Request('https://example.test/missing.png'),
