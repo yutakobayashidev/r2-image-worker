@@ -2,6 +2,17 @@
 let cache_control = "public, max-age=2592000"
 
 ///|
+#external
+priv type ImagesBinding
+
+///|
+priv struct ImageTransformParameters {
+  width : Int?
+  height : Int?
+  quality : Int?
+}
+
+///|
 extern "js" fn request_form_data(
   req : @cloudflare.CloudflareRequest,
 ) -> @js_async.Promise[@http.FormData] =
@@ -24,14 +35,26 @@ extern "js" fn form_string(fd : @http.FormData, name : String) -> String? =
 ///|
 extern "js" fn file_array_buffer(
   file : @file.File,
-) -> @js_async.Promise[@core.Any] =
+) -> @js_async.Promise[@arraybuffer.ArrayBuffer] =
   #| (file) => file.arrayBuffer()
 
 ///|
-extern "js" fn response_any(
-  body : @core.Any,
+extern "js" fn headers_new() -> @http.Headers =
+  #| () => new Headers()
+
+///|
+extern "js" fn headers_set(
+  headers : @http.Headers,
+  name : String,
+  value : String,
+) -> Unit =
+  #| (headers, name, value) => headers.set(name, value)
+
+///|
+extern "js" fn response_stream(
+  body : @streams.ReadableStream,
   status : Int,
-  headers : @core.Any,
+  headers : @http.Headers,
 ) -> @http.Response =
   #| (body, status, headers) => new Response(body, { status, headers })
 
@@ -47,7 +70,9 @@ extern "js" fn btoa(value : String) -> String =
   #| (value) => btoa(value)
 
 ///|
-extern "js" fn sha256_hex(value : @core.Any) -> @js_async.Promise[String] =
+extern "js" fn sha256_hex(
+  value : @arraybuffer.ArrayBuffer,
+) -> @js_async.Promise[String] =
   #| async (value) => {
   #|   const digest = await crypto.subtle.digest("SHA-256", value);
   #|   return [...new Uint8Array(digest)]
@@ -65,13 +90,18 @@ extern "js" fn parse_int_option(value : String) -> Int? =
 
 ///|
 extern "js" fn images_transform_response(
-  images : @core.Any,
+  images : ImagesBinding,
   stream : @streams.ReadableStream,
-  parameters : @core.Any,
-  format : String,
+  width : Int?,
+  height : Int?,
   quality : Int?,
+  format : String,
 ) -> @js_async.Promise[@http.Response] =
-  #| async (images, stream, parameters, format, quality) => {
+  #| async (images, stream, width, height, quality, format) => {
+  #|   const parameters = {};
+  #|   if (width !== undefined) parameters.width = width;
+  #|   if (height !== undefined) parameters.height = height;
+  #|   if (quality !== undefined) parameters.quality = quality;
   #|   const output = { format };
   #|   if (quality !== undefined) output.quality = quality;
   #|   const result = await images.input(stream).transform(parameters).output(output);
@@ -92,8 +122,11 @@ fn env_r2(env : @cloudflare.CloudflareEnv) -> @cloudflare.R2Bucket {
 }
 
 ///|
-fn env_images(env : @cloudflare.CloudflareEnv) -> @core.Any? {
-  env.get("IMAGES")
+fn env_images(env : @cloudflare.CloudflareEnv) -> ImagesBinding? {
+  match env.get("IMAGES") {
+    Some(value) => Some(value.cast())
+    None => None
+  }
 }
 
 ///|
@@ -148,28 +181,30 @@ fn int_query(params : @url.URLSearchParams, name : String) -> Int? {
 }
 
 ///|
-fn image_parameters(params : @url.URLSearchParams) -> @core.Any? {
-  let entries : Array[(String, @core.Any)] = []
+fn image_parameters(params : @url.URLSearchParams) -> ImageTransformParameters? {
+  let mut width = None
+  let mut height = None
+  let mut quality = None
   if int_query(params, "width") is Some(value) {
-    entries.push(("width", @core.any(value)))
+    width = Some(value)
   } else if params.get("width") is Some(_) {
     return None
   }
   if int_query(params, "height") is Some(value) {
-    entries.push(("height", @core.any(value)))
+    height = Some(value)
   } else if params.get("height") is Some(_) {
     return None
   }
   if int_query(params, "quality") is Some(value) {
-    entries.push(("quality", @core.any(value)))
+    quality = Some(value)
   } else if params.get("quality") is Some(_) {
     return None
   }
-  Some(@core.from_entries(entries))
+  Some({ width, height, quality })
 }
 
 ///|
-async fn sha256_array_buffer(buffer : @core.Any) -> String {
+async fn sha256_array_buffer(buffer : @arraybuffer.ArrayBuffer) -> String {
   sha256_hex(buffer).wait()
 }
 
@@ -205,7 +240,7 @@ async fn handle_upload(
     cacheControl: None,
     cacheExpiry: None,
   }
-  let _ = env_r2(env).put(key, body, httpMetadata=metadata)
+  let _ = env_r2(env).put(key, @core.any(body), httpMetadata=metadata)
   @http.Response::text_(key, 200)
 }
 
@@ -234,13 +269,13 @@ async fn handle_get(
     match (env_images(env), image_parameters(params)) {
       (Some(images), Some(parameters)) => {
         let format = preferred_content_type(req.header("Accept"), content_type)
-        let quality = int_query(params, "quality")
         let response = images_transform_response(
           images,
           object.body(),
-          parameters,
+          parameters.width,
+          parameters.height,
+          parameters.quality,
           format,
-          quality,
         ).wait()
         response_set_header(response, "Cache-Control", cache_control)
         return response
@@ -249,11 +284,10 @@ async fn handle_get(
     }
   }
 
-  let headers = @core.from_entries([
-    ("Cache-Control", @core.any(cache_control)),
-    ("Content-Type", @core.any(content_type)),
-  ])
-  response_any(@core.any(object.body()), 200, headers)
+  let headers = headers_new()
+  headers_set(headers, "Cache-Control", cache_control)
+  headers_set(headers, "Content-Type", content_type)
+  response_stream(object.body(), 200, headers)
 }
 
 ///|

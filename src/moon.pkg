@@ -1,5 +1,6 @@
 import {
   "mizchi/cloudflare",
+  "mizchi/js/builtins/arraybuffer",
   "mizchi/js/browser/file",
   "mizchi/js/core",
   "mizchi/js/web/http",
